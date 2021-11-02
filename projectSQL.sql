@@ -1,3 +1,30 @@
+# *** priprava samostatne tabulky weather pro dalsi rozbor ***
+CREATE OR REPLACE TABLE t_michal_boucek_weather_projekt_sql_final AS
+SELECT
+	`time`,
+	temp,
+	gust,
+	rain,
+	DATE(`date`) AS 'date',
+	city
+FROM weather
+WHERE city IS NOT NULL
+;
+UPDATE t_michal_boucek_weather_projekt_sql_final -- oprava nazvu podle tab cities
+	SET city = 'Kyiv'
+	WHERE city = 'Kiev'
+;
+ALTER TABLE t_michal_boucek_weather_projekt_sql_final
+	ADD COLUMN country TEXT
+;
+UPDATE t_michal_boucek_weather_projekt_sql_final AS t, cities AS c -- doplneni zemi
+SET t.country = c.country
+WHERE t.city = c.city
+	AND c.capital = 'primary'
+;
+
+# *** tabulka konecnych dat
+#CREATE OR REPLACE TABLE t_michal_boucek_projekt_SQL_final AS -- pouze pro vyvoj - pak odkomentovat
 SELECT
 	cbd.country,
 	cbd.`date`,
@@ -27,7 +54,11 @@ SELECT
 	e2019.mortaliy_under5 AS mortality_under5,
 	c.median_age_2018,
 	r.religion,
-	ROUND((r.population/r_sum.ssum)*100,2) AS percent_religion
+	ROUND((r.population/r_sum.ssum)*100,2) AS percent_religion,
+	ROUND(le2015.life_expectancy-le1965.life_expectancy) AS 'life_expectancy_diff_2015-1965',
+	temp.avg_daily_temp AS 'avg_daily_temp °C', -- prumerna denni teplota v case 6:00-18:00
+	rhours.raining_hours, -- pocet hodin, kdy srazky byly nenulove
+	mgust.maxgust AS 'max_gust km/h'
 FROM covid19_basic_differences AS cbd
 LEFT JOIN covid19_tests AS t
 	ON cbd.country = t.country
@@ -65,9 +96,49 @@ LEFT JOIN (
 	GROUP BY country
 ) AS r_sum
 	ON cbd.country = r_sum.country
+LEFT JOIN life_expectancy AS le2015
+	ON le2015.country = cbd.country
+	AND le2015.`year` = 2015
+LEFT JOIN life_expectancy AS le1965
+	ON le1965.country = cbd.country
+	AND le1965.`year` = 1965	
+LEFT JOIN (
+	SELECT
+		country,
+		`date`,
+		ROUND(AVG(SUBSTRING_INDEX(temp, ' ', 1)),2) AS avg_daily_temp
+	FROM t_michal_boucek_weather_projekt_sql_final
+	WHERE CAST(`time` AS TIME) BETWEEN '6:00' AND '18:00'
+	GROUP BY country, `date`
+) AS temp
+	ON temp.country = cbd.country
+	AND temp.`date` = cbd.`date`	
+LEFT JOIN (
+	SELECT
+		country,
+		`date`,
+		CASE
+			WHEN count(DISTINCT `time`) IS NULL THEN 0 ELSE count(DISTINCT `time`)
+		END AS raining_hours 
+	FROM t_michal_boucek_weather_projekt_sql_final
+	WHERE rain != '0.0 mm'
+	GROUP BY country, `date`
+) AS rhours
+	ON rhours.country = cbd.country
+	AND rhours.`date` = cbd.`date`
+LEFT JOIN (
+	SELECT
+		country,
+		`date`,
+		MAX(SUBSTRING_INDEX(gust, ' ', 1)) AS maxgust
+	FROM t_michal_boucek_weather_projekt_sql_final
+	GROUP BY country, `date`
+) AS mgust
+	ON mgust.country = cbd.country
+	AND mgust.`date` = cbd.`date`
 WHERE cbd.confirmed IS NOT NULL
 	AND cbd.confirmed >= 0 -- vynechat nulove hodnoty
-	AND cbd.country = 'Albania' -- pouze pro vyvoj
-	#AND cbd.date = '2020-01-23' -- pouze pro vyvoj
-# ORDER BY cbd.country, cbd.`date`, r.religion -- vypnuto pro vyvoj, zpomaluje
+	AND cbd.country = 'Belgium' -- pouze pro vyvoj
+	AND cbd.date = '2020-02-09' -- pouze pro vyvoj
+ORDER BY cbd.country, cbd.`date`, r.religion
 ;
