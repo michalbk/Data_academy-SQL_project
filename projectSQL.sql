@@ -44,13 +44,13 @@ UPDATE t_michal_boucek_sqlfinal_covid19_basic_differences_temp
 	WHERE country LIKE '%brazzaville%';
 CREATE OR REPLACE TABLE t_congo_sum AS -- pomocna tabulka - soucet Brazzaville + Kinshasa
 	SELECT
-		date,
-		sum(confirmed) AS sum_congo
+		`date`,
+		SUM(confirmed) AS sum_congo
 	FROM covid19_basic_differences
 	WHERE country LIKE '%congo%'
 		AND confirmed IS NOT NULL
 		AND confirmed >= 0
-	GROUP BY date;
+	GROUP BY `date`;
 UPDATE t_michal_boucek_sqlfinal_covid19_basic_differences_temp AS t1, t_congo_sum AS t2 -- nahrani sumy
 	SET t1.confirmed = t2.sum_congo
 	WHERE t1.country = 'Congo'
@@ -123,14 +123,14 @@ UPDATE t_michal_boucek_sqlfinal_economies_temp
 	WHERE country = 'St. Vincent and the Grenadines';
 
 
-# *** POMOCNA TABULKA lookup table - population neobsazene v economies ***
+# *** POMOCNA TABULKA lookup table - population neobsazene v economies pro rok 2020 ***
 CREATE OR REPLACE TABLE t_michal_boucek_sqlfinal_lookup_table_temp AS
 SELECT
 	country,
 	population
 FROM lookup_table
 WHERE province IS NULL -- cele soucty populace ve state
-	AND country IN ('Holy See', 'Taiwan*', 'West Bank and Gaza');
+	AND country IN ('Eritrea', 'Holy See', 'Taiwan*', 'West Bank and Gaza');
 # sjednoceni nazvu
 UPDATE t_michal_boucek_sqlfinal_lookup_table_temp 
 	SET country = 'Taiwan'
@@ -217,7 +217,7 @@ UPDATE t_michal_boucek_sqlfinal_life_expectancy_temp
 
 # *** POMOCNA TABULKA weather ***
 CREATE OR REPLACE TABLE t_michal_boucek_sqlfinal_weather_temp AS
-SELECT
+SELECT DISTINCT -- filtrovat duplicity - Vienna, Prague
 	`time`,
 	temp,
 	gust,
@@ -232,10 +232,23 @@ UPDATE t_michal_boucek_sqlfinal_weather_temp  -- oprava nazvu mesta podle tabulk
 	WHERE city = 'Kiev';
 ALTER TABLE t_michal_boucek_sqlfinal_weather_temp -- novy sloupec country
 	ADD COLUMN country TEXT;
+CREATE OR REPLACE TABLE t_michal_boucek_cities_temp AS -- pripojeni country podle mest
+SELECT DISTINCT
+	c.country, c.city
+FROM cities AS c
+JOIN t_michal_boucek_sqlfinal_weather_temp AS w
+	ON c.city = w.city
+	AND c.capital = 'primary';
+UPDATE t_michal_boucek_sqlfinal_weather_temp AS t, t_michal_boucek_cities_temp AS c
+SET t.country = c.country
+WHERE t.city = c.city;
+DROP TABLE t_michal_boucek_cities_temp;
+/*# toto nefunguje pri spusteni celeho skriptu! Jako samostatny prikaz ano. Nutna oklika viz vyse.
 UPDATE t_michal_boucek_sqlfinal_weather_temp AS t, cities AS c -- pripojeni country podle mest
 SET t.country = c.country
 WHERE t.city = c.city
-	AND c.capital = 'primary';
+	AND c.capital = 'primary';*/
+
 # sjednoceni nazvu
 UPDATE t_michal_boucek_sqlfinal_weather_temp 
 	SET country = 'North Macedonia'
@@ -249,7 +262,7 @@ UPDATE t_michal_boucek_sqlfinal_weather_temp
 
 
 # *** VYSLEDNA TABULKA ***
-#CREATE OR REPLACE TABLE t_michal_boucek_projekt_SQL_final AS -- pouze pro vyvoj - pak odkomentovat
+CREATE OR REPLACE TABLE t_michal_boucek_projekt_SQL_final AS
 SELECT
 	cbd.country,
 	cbd.`date`,
@@ -260,29 +273,32 @@ SELECT
 		WHEN e.population IS NOT NULL THEN e.population ELSE lt.population
 	END AS population,
 	CASE
-		WHEN weekday(cbd.`date`) IN (5,6) THEN 1 ELSE 0
+		WHEN WEEKDAY(cbd.`date`) IN (5,6) THEN 1 ELSE 0
 	END AS flag_weekend,
 	CASE
-		WHEN cbd.`date` BETWEEN '2019-12-22' AND '2020-03-19' THEN 0
-		WHEN cbd.`date` BETWEEN '2020-03-20' AND '2020-06-19' THEN 1
-		WHEN cbd.`date` BETWEEN '2020-06-20' AND '2020-09-21' THEN 2
-		WHEN cbd.`date` BETWEEN '2020-09-22' AND '2020-12-20' THEN 3
+		WHEN cbd.`date` BETWEEN '2019-12-22' AND '2020-03-19' THEN 0 -- zima
+		WHEN cbd.`date` BETWEEN '2020-03-20' AND '2020-06-19' THEN 1 -- jaro
+		WHEN cbd.`date` BETWEEN '2020-06-20' AND '2020-09-21' THEN 2 -- leto
+		WHEN cbd.`date` BETWEEN '2020-09-22' AND '2020-12-20' THEN 3 -- podzim
 		WHEN cbd.`date` BETWEEN '2020-12-21' AND '2021-03-19' THEN 0
 		WHEN cbd.`date` BETWEEN '2021-03-20' AND '2021-06-20' THEN 1
 		ELSE 'out of range'
 	END AS season,
-	ROUND(c.population_density) AS 'population_density/km2',
-	ROUND(e.GDP/e.population,1) AS 'GDP_2020_per_inhabitant (USD)',
+	ROUND(c.population_density) AS 'population_density/km^2',
+	CASE
+		WHEN e.population IS NOT NULL THEN ROUND(GDPtab.GDP/e.population,1) ELSE ROUND(GDPtab.GDP/lt.population,1)
+	END AS 'GDP_per_inhabitant_[USD]',
+	GDPtab.GDP_year AS GDP_year,
 	ginitab.gini AS gini,
 	ginitab.gini_year AS gini_year,
 	e2019.mortaliy_under5 AS mortality_under5,
 	c.median_age_2018,
 	r.religion,
-	ROUND((r.population/r_sum.ssum)*100,2) AS percent_religion,
+	ROUND((r.population/r_sum.ssum)*100,2) AS percent_religion_2020,
 	ROUND(le2015.life_expectancy-le1965.life_expectancy) AS 'life_expectancy_diff_2015-1965',
-	temp.avg_daily_temp AS 'avg_daily_temp °C', -- prumerna denni teplota v case 6:00-18:00
+	temp.avg_daily_temp AS 'avg_daily_temp_[°C]', -- prumerna denni teplota v case 6:00-18:00
 	rhours.raining_hours, -- pocet hodin, kdy srazky byly nenulove
-	mgust.maxgust AS 'max_gust km/h'
+	mgust.maxgust AS 'max_gust_[km/h]'
 FROM t_michal_boucek_sqlfinal_covid19_basic_differences_temp AS cbd
 LEFT JOIN t_michal_boucek_sqlfinal_covid19_tests_temp AS t
 	ON cbd.country = t.country
@@ -294,6 +310,16 @@ LEFT JOIN t_michal_boucek_sqlfinal_lookup_table_temp AS lt
 	ON lt.country = cbd.country
 LEFT JOIN t_michal_boucek_sqlfinal_countries_temp AS c
 	ON c.country = cbd.country
+LEFT JOIN ( -- GDP agregace - nejaktualnejsi dostupny rok pro kazdou zemi
+	SELECT 
+		country,
+		MAX(`year`) AS GDP_year,
+		GDP
+	FROM t_michal_boucek_sqlfinal_economies_temp
+	WHERE GDP IS NOT NULL
+	GROUP BY country
+) AS GDPtab
+	ON cbd.country = GDPtab.country
 LEFT JOIN ( -- gini agregace - nejaktualnejsi dostupny rok pro kazdou zemi
 	SELECT 
 		country,
@@ -339,7 +365,7 @@ LEFT JOIN (
 		country,
 		`date`,
 		CASE
-			WHEN count(DISTINCT `time`) IS NULL THEN 0 ELSE count(DISTINCT `time`)
+			WHEN COUNT(DISTINCT `time`) IS NULL THEN 0 ELSE COUNT(DISTINCT `time`)
 		END AS raining_hours 
 	FROM t_michal_boucek_sqlfinal_weather_temp
 	WHERE rain != '0.0 mm'
@@ -357,9 +383,7 @@ LEFT JOIN (
 ) AS mgust
 	ON mgust.country = cbd.country
 	AND mgust.`date` = cbd.`date`
-WHERE cbd.country = 'Congo' -- pouze pro vyvoj
-	AND cbd.date = '2020-02-09' -- pouze pro vyvoj
-ORDER BY cbd.country, cbd.`date`, r.religion
+ORDER BY cbd.country, cbd.`date`
 ;
 
 # *** VYMAZ POMOCNYCH TABULEK ***
