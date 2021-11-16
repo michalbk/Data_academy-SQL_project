@@ -40,6 +40,7 @@ flag_weekend
 
 season
 - 0 = zima, 1 = jaro, 2 = léto, 3 = podzim
+- neuvažuje se každoroční posun astronomických začátků/konců ročních období (+- 1-2 dny)
 
 population_density/km^2 - hustota zalidnění (počet obyvatel / km^2)
 

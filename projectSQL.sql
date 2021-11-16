@@ -243,11 +243,6 @@ UPDATE t_michal_boucek_sqlfinal_weather_temp AS t, t_michal_boucek_cities_temp A
 SET t.country = c.country
 WHERE t.city = c.city;
 DROP TABLE t_michal_boucek_cities_temp;
-/*# toto nefunguje pri spusteni celeho skriptu! Jako samostatny prikaz ano. Nutna oklika viz vyse.
-UPDATE t_michal_boucek_sqlfinal_weather_temp AS t, cities AS c -- pripojeni country podle mest
-SET t.country = c.country
-WHERE t.city = c.city
-	AND c.capital = 'primary';*/
 
 # sjednoceni nazvu
 UPDATE t_michal_boucek_sqlfinal_weather_temp 
@@ -276,18 +271,27 @@ SELECT
 		WHEN WEEKDAY(cbd.`date`) IN (5,6) THEN 1 ELSE 0
 	END AS flag_weekend,
 	CASE
-		WHEN cbd.`date` BETWEEN '2019-12-22' AND '2020-03-19' THEN 0 -- zima
-		WHEN cbd.`date` BETWEEN '2020-03-20' AND '2020-06-19' THEN 1 -- jaro
-		WHEN cbd.`date` BETWEEN '2020-06-20' AND '2020-09-21' THEN 2 -- leto
-		WHEN cbd.`date` BETWEEN '2020-09-22' AND '2020-12-20' THEN 3 -- podzim
-		WHEN cbd.`date` BETWEEN '2020-12-21' AND '2021-03-19' THEN 0
-		WHEN cbd.`date` BETWEEN '2021-03-20' AND '2021-06-20' THEN 1
-		ELSE 'out of range'
-	END AS season,
+		WHEN (MONTH(cbd.`date`) = 12 AND DAY(cbd.`date`) >= 21)
+			OR MONTH(cbd.`date`) IN (1, 2)
+			OR ((MONTH(cbd.`date`) = 3 AND DAY(cbd.`date`) <= 19))
+			THEN 0 -- zima
+		WHEN (MONTH(cbd.`date`) = 3 AND DAY(cbd.`date`) >= 20)
+			OR MONTH(cbd.`date`) IN (4, 5)
+			OR ((MONTH(cbd.`date`) = 6 AND DAY(cbd.`date`) <= 19))
+			THEN 1 -- jaro
+		WHEN (MONTH(cbd.`date`) = 6 AND DAY(cbd.`date`) >= 20)
+			OR MONTH(cbd.`date`) IN (7, 8)
+			OR ((MONTH(cbd.`date`) = 9 AND DAY(cbd.`date`) <= 21))
+			THEN 2 -- leto
+		WHEN (MONTH(cbd.`date`) = 9 AND DAY(cbd.`date`) >= 22)
+			OR MONTH(cbd.`date`) IN (10, 11)
+			OR ((MONTH(cbd.`date`) = 12 AND DAY(cbd.`date`) <= 20))
+			THEN 3 -- podzim
+	END AS season, -- neuvazuje se mezirocni posun zacatku/koncu rocnich obdobi +- 1-2 dny
 	ROUND(c.population_density) AS 'population_density/km^2',
 	CASE
 		WHEN e.population IS NOT NULL THEN ROUND(GDPtab.GDP/e.population,1) ELSE ROUND(GDPtab.GDP/lt.population,1)
-	END AS 'GDP_per_inhabitant_[USD]',
+	END AS 'GDP_per_inhabitant_in_USD',
 	GDPtab.GDP_year AS GDP_year,
 	ginitab.gini AS gini,
 	ginitab.gini_year AS gini_year,
@@ -296,9 +300,9 @@ SELECT
 	r.religion,
 	ROUND((r.population/r_sum.ssum)*100,2) AS percent_religion_2020,
 	ROUND(le2015.life_expectancy-le1965.life_expectancy) AS 'life_expectancy_diff_2015-1965',
-	temp.avg_daily_temp AS 'avg_daily_temp_[�C]', -- prumerna denni teplota v case 6:00-18:00
+	temp.avg_daily_temp AS 'avg_daily_temp_degC', -- prumerna denni teplota ve °C v case 6:00-18:00
 	rhours.raining_hours, -- pocet hodin, kdy srazky byly nenulove
-	mgust.maxgust AS 'max_gust_[km/h]'
+	mgust.maxgust AS 'max_gust_km/h'
 FROM t_michal_boucek_sqlfinal_covid19_basic_differences_temp AS cbd
 LEFT JOIN t_michal_boucek_sqlfinal_covid19_tests_temp AS t
 	ON cbd.country = t.country
@@ -353,7 +357,7 @@ LEFT JOIN (
 	SELECT
 		country,
 		`date`,
-		ROUND(AVG(SUBSTRING_INDEX(temp, ' ', 1)),2) AS avg_daily_temp
+		ROUND(AVG(REPLACE(temp, ' °c', '')),2) AS avg_daily_temp
 	FROM t_michal_boucek_sqlfinal_weather_temp
 	WHERE CAST(`time` AS TIME) BETWEEN '6:00' AND '18:00'
 	GROUP BY country, `date`
@@ -377,7 +381,7 @@ LEFT JOIN (
 	SELECT
 		country,
 		`date`,
-		MAX(SUBSTRING_INDEX(gust, ' ', 1)) AS maxgust
+		MAX(REPLACE(gust, ' km/h', '')) AS maxgust
 	FROM t_michal_boucek_sqlfinal_weather_temp
 	GROUP BY country, `date`
 ) AS mgust
